@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../model/lat_lng.dart';
-import '../utils/colors.dart';
+import 'dart:async';
+import 'dart:math';
+import 'dart:ui' as ui;
+import 'dart:typed_data';
+import 'dart:io';
+
+import '../utils/ing_strings.dart';
+
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -20,6 +28,7 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     getPositionStream();
+    getCustomMarker();
   }
 
   double mapBottomPadding = 0.0;
@@ -27,12 +36,7 @@ class _MapScreenState extends State<MapScreen> {
   late BitmapDescriptor customIcon;
 
   late GoogleMapController mapController;
-  Set<Marker> markers = {
- Marker(
-  markerId: MarkerId('currentLocation'),
-  position: LatLng(37.7749, -122.4194),
-  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue), // Customize the icon
-  )
+  Set<Marker> _markers = {
   };
   Position? _currentPosition;
   static double lat = 0.0;
@@ -75,9 +79,41 @@ class _MapScreenState extends State<MapScreen> {
   }
 
 
+    late GoogleMapController _controller;
+    late BitmapDescriptor myIcon;
 
-  // on below line we are specifying our camera position
-  static final CameraPosition _kGoogle = CameraPosition(
+
+
+    setMarkerAndMoveCamera(Position position){
+      _controller.animateCamera(CameraUpdate.newCameraPosition( CameraPosition(
+        target: LatLng(position.latitude,position.longitude),
+        zoom: 15.0,
+      )));
+
+      setState(() {
+        _markers.add(
+            Marker(
+              rotation: 0,
+              infoWindow: InfoWindow(
+                title: 'dhaka',
+              ),
+              markerId: MarkerId('currentlodation'),
+              position: LatLng(position.latitude,position.longitude),
+              icon: myIcon == null? BitmapDescriptor.defaultMarker : myIcon /*BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue)*/,
+            )
+        );
+      });
+    }
+
+    getCustomMarker(){
+      getMarkerIcon(CarImg,'Bike(0 kph)',Colors.indigo,0.0).then((value){
+        setState(() {
+          myIcon = value;
+        });
+      });
+    }
+
+    static final CameraPosition _kGoogle = CameraPosition(
     target: LatLng(lat, lng),
     zoom: 14.4746,
 
@@ -115,9 +151,13 @@ class _MapScreenState extends State<MapScreen> {
                     mapToolbarEnabled: true,
                     buildingsEnabled: true,
                     myLocationButtonEnabled: true,
-                    myLocationEnabled: true,
+                    myLocationEnabled: false,
                     mapType: MapType.terrain,
-                    markers: markers,
+                    markers: _markers,
+                    onMapCreated: (GoogleMapController controller) {
+                      _controller = controller;
+                      setMarkerAndMoveCamera(_currentPosition!);
+                    },
                     trafficEnabled: true,
                     compassEnabled: true,
                   ),
@@ -133,3 +173,43 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
+Future<BitmapDescriptor> getMarkerIcon(String imagePath,String infoText,Color color,double rotateDegree) async {
+  final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+  final Canvas canvas = Canvas(pictureRecorder);
+
+
+  Size canvasSize = Size(300.0,400.0);
+  Size markerSize = Size(150.0,150.0);
+  final double infoHeight = 10.0;
+  final double shadowWidth = 30.0;
+  canvas.translate(canvasSize.width/1.5, canvasSize.height/2+infoHeight);
+  Rect oval = Rect.fromLTWH(-markerSize.width, -markerSize.height/10, markerSize.width-shadowWidth, markerSize.height-shadowWidth);
+  canvas.save();
+  canvas.clipPath(Path()
+    ..addRect(oval));
+  ui.Image image = await getImageFromPath(imagePath);
+  paintImage(canvas: canvas,image: image, rect: oval, fit: BoxFit.fill);
+  canvas.restore();
+  canvas.restore();
+  final ui.Image markerAsImage = await pictureRecorder.endRecording().toImage(
+      canvasSize.width.toInt(),
+      canvasSize.height.toInt()
+  );
+  final ByteData? byteData = await markerAsImage.toByteData(format: ui.ImageByteFormat.png);
+  final Uint8List uint8List = byteData!.buffer.asUint8List();
+  return BitmapDescriptor.fromBytes(uint8List);
+}
+
+
+Future<ui.Image> getImageFromPath(String imagePath) async {
+  var bd = await rootBundle.load(imagePath);
+  Uint8List imageBytes = Uint8List.view(bd.buffer);
+
+  final Completer<ui.Image> completer = new Completer();
+
+  ui.decodeImageFromList(imageBytes, (ui.Image img) {
+    return completer.complete(img);
+  });
+
+  return completer.future;
+}
